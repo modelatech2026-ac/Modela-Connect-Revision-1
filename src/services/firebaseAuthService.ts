@@ -898,6 +898,7 @@ export async function appendActivityLogToFirestore(logItem: {
       result: "SUCCESS",
     };
     await setDoc(logRef, docData);
+    await setDoc(doc(db, "logs", logRef.id), docData).catch(() => {});
     return { success: true, firestoreSynced: true, id: logRef.id };
   } catch (err: unknown) {
     const errorMsg = err instanceof Error ? err.message : String(err);

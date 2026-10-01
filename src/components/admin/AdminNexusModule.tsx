@@ -32,7 +32,7 @@ import {
   updateUserStatusInFirestore,
   subscribeToAccessRequests,
 } from "../../services/firebaseAuthService";
-import { doc, updateDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { collection, onSnapshot, doc, updateDoc, setDoc, serverTimestamp } from "firebase/firestore";
 
 export const AdminNexusModule: React.FC = () => {
   const { currentRole, currentUser } = useAuth();
@@ -49,7 +49,10 @@ export const AdminNexusModule: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [processingUid, setProcessingUid] = useState<string | null>(null);
 
-  // Real-time Firestore access_requests state
+  // Real-time Firestore collections state: users, requests, logs
+  const [users, setUsers] = useState<any[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
   const [firestoreRequests, setFirestoreRequests] = useState<AuthRequestUser[]>([]);
 
   // Security Perimeter state (preserves security enclave controls)
@@ -58,18 +61,97 @@ export const AdminNexusModule: React.FC = () => {
   const [ipAllowlist, setIpAllowlist] = useState("192.168.1.0/24\n10.0.0.0/16");
   const [livenessCheck, setLivenessCheck] = useState(true);
 
-  // Requirement 2: Real-Time Admin Nexus Listener on shared 'access_requests' collection
+  // Real-Time Firestore onSnapshot Listeners ('users', 'requests', 'logs') without compound index requirement
   useEffect(() => {
-    const unsubscribe = subscribeToAccessRequests(
-      (loaded) => {
-        setFirestoreRequests(loaded);
+    const { db } = getSafeFirebase();
+    if (!db) {
+      const unsubscribeFallback = subscribeToAccessRequests(
+        (loaded) => {
+          setFirestoreRequests(loaded);
+          setRequests(loaded as any);
+        },
+        (err) => {
+          console.error("Realtime listener error:", err);
+        }
+      );
+      return () => {
+        if (typeof unsubscribeFallback === "function") unsubscribeFallback();
+      };
+    }
+
+    // 1. Real-time 'users' collection listener
+    const usersCol = collection(db, "users");
+    const unsubscribeUsers = onSnapshot(
+      usersCol,
+      (snapshot) => {
+        const userList = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          uid: docSnap.id,
+          ...docSnap.data(),
+        }));
+        // Client-side sorting without compound database index requirement
+        userList.sort((a: any, b: any) => {
+          const tA = new Date(a.createdAt || a.requestedAt || 0).getTime();
+          const tB = new Date(b.createdAt || b.requestedAt || 0).getTime();
+          return tB - tA;
+        });
+        setUsers(userList);
       },
-      (err) => {
-        console.error("[Admin Nexus] onSnapshot listener error:", err);
+      (error) => {
+        console.error("Realtime listener error:", error);
       }
     );
+
+    // 2. Real-time 'requests' collection listener
+    const requestsCol = collection(db, "requests");
+    const unsubscribeRequests = onSnapshot(
+      requestsCol,
+      (snapshot) => {
+        const reqList = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          uid: docSnap.id,
+          ...docSnap.data(),
+        }));
+        // Client-side sorting without compound index requirement
+        reqList.sort((a: any, b: any) => {
+          const tA = new Date(a.createdAt || a.requestedAt || a.requestTime || 0).getTime();
+          const tB = new Date(b.createdAt || b.requestedAt || b.requestTime || 0).getTime();
+          return tB - tA;
+        });
+        setRequests(reqList);
+        setFirestoreRequests(reqList as any);
+      },
+      (error) => {
+        console.error("Realtime listener error:", error);
+      }
+    );
+
+    // 3. Real-time 'logs' collection listener
+    const logsCol = collection(db, "logs");
+    const unsubscribeLogs = onSnapshot(
+      logsCol,
+      (snapshot) => {
+        const logList = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        // Client-side sorting without compound index requirement
+        logList.sort((a: any, b: any) => {
+          const tA = new Date(a.timestamp || a.createdAt || 0).getTime();
+          const tB = new Date(b.timestamp || b.createdAt || 0).getTime();
+          return tB - tA;
+        });
+        setLogs(logList);
+      },
+      (error) => {
+        console.error("Realtime listener error:", error);
+      }
+    );
+
     return () => {
-      if (typeof unsubscribe === "function") unsubscribe();
+      unsubscribeUsers();
+      unsubscribeRequests();
+      unsubscribeLogs();
     };
   }, []);
 

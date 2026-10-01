@@ -75,6 +75,8 @@ export const AdminApprovalDashboard: React.FC = () => {
   const [activeView, setActiveView] = useState<"ACCESS_REQUESTS" | "AUDIT_HISTORY" | "EMPLOYEES">("ACCESS_REQUESTS");
 
   const [users, setUsers] = useState<ManagedUser[]>([]);
+  const [requests, setRequests] = useState<any[]>([]);
+  const [logs, setLogs] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | "PENDING" | "APPROVED" | "REJECTED">("ALL");
@@ -145,27 +147,120 @@ export const AdminApprovalDashboard: React.FC = () => {
     }
   };
 
-  // Realtime subscription & instant fetch
+  // Real-time Firestore subscriptions for 'users', 'requests', and 'logs' without composite index requirement
   useEffect(() => {
     if (!hasAccess) return;
 
     fetchUsers(false);
 
-    const unsubscribe = subscribeToAllRequests(
-      (loadedRequests) => {
-        setUsers(loadedRequests as any);
+    const { db } = getSafeFirebase();
+    if (!db) {
+      const unsubscribe = subscribeToAllRequests(
+        (loadedRequests) => {
+          setUsers(loadedRequests as any);
+          setRequests(loadedRequests as any);
+          setIsLoading(false);
+        },
+        (err) => {
+          console.error("Realtime listener error:", err);
+          setIsLoading(false);
+        }
+      );
+      return () => {
+        if (typeof unsubscribe === "function") unsubscribe();
+      };
+    }
+
+    // 1. Real-time 'users' collection listener
+    const usersCol = collection(db, "users");
+    const unsubscribeUsers = onSnapshot(
+      usersCol,
+      (snapshot) => {
+        const userList = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          uid: docSnap.id,
+          ...docSnap.data(),
+        }));
+        // Client-side sorting without requiring database compound indexes
+        userList.sort((a: any, b: any) => {
+          const tA = new Date(a.createdAt || a.requestedAt || 0).getTime();
+          const tB = new Date(b.createdAt || b.requestedAt || 0).getTime();
+          return tB - tA;
+        });
+        setUsers(userList as any);
         setIsLoading(false);
       },
-      (err) => {
-        console.warn("Requests subscription notice:", err);
+      (error) => {
+        console.error("Realtime listener error:", error);
         setIsLoading(false);
       }
     );
 
-    return () => {
-      if (typeof unsubscribe === "function") {
-        unsubscribe();
+    // 2. Real-time 'requests' collection listener
+    const requestsCol = collection(db, "requests");
+    const unsubscribeRequests = onSnapshot(
+      requestsCol,
+      (snapshot) => {
+        const reqList = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          uid: docSnap.id,
+          ...docSnap.data(),
+        }));
+        // Client-side sorting and filtering without composite index requirement
+        reqList.sort((a: any, b: any) => {
+          const tA = new Date(a.createdAt || a.requestedAt || a.requestTime || 0).getTime();
+          const tB = new Date(b.createdAt || b.requestedAt || b.requestTime || 0).getTime();
+          return tB - tA;
+        });
+        setRequests(reqList);
+
+        // Dynamically merge real-time requests into users list
+        if (reqList.length > 0) {
+          setUsers((prev) => {
+            const map = new Map<string, any>();
+            prev.forEach((u) => map.set((u.id || u.uid || u.email || "").toLowerCase(), u));
+            reqList.forEach((r: any) => {
+              const key = (r.id || r.uid || r.email || r.userId || "").toLowerCase();
+              if (key) {
+                const existing = map.get(key) || {};
+                map.set(key, { ...existing, ...r });
+              }
+            });
+            return Array.from(map.values());
+          });
+        }
+      },
+      (error) => {
+        console.error("Realtime listener error:", error);
       }
+    );
+
+    // 3. Real-time 'logs' collection listener
+    const logsCol = collection(db, "logs");
+    const unsubscribeLogs = onSnapshot(
+      logsCol,
+      (snapshot) => {
+        const logList = snapshot.docs.map((docSnap) => ({
+          id: docSnap.id,
+          ...docSnap.data(),
+        }));
+        // Client-side sorting without database compound index
+        logList.sort((a: any, b: any) => {
+          const tA = new Date(a.timestamp || a.createdAt || 0).getTime();
+          const tB = new Date(b.timestamp || b.createdAt || 0).getTime();
+          return tB - tA;
+        });
+        setLogs(logList);
+      },
+      (error) => {
+        console.error("Realtime listener error:", error);
+      }
+    );
+
+    return () => {
+      unsubscribeUsers();
+      unsubscribeRequests();
+      unsubscribeLogs();
     };
   }, [hasAccess]);
 
