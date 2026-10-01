@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   Building,
   User,
+  Loader2,
 } from "lucide-react";
 import { useData } from "../../context/DataContext";
 import { useAuth } from "../../context/AuthContext";
@@ -20,15 +21,45 @@ import { useToast } from "../../context/ToastContext";
 import { StatusBadge } from "../ui/StatusBadge";
 import { AccessRestricted } from "../ui/AccessRestricted";
 import { PayrollRecord } from "../../types";
+import { downloadFileWithFallback } from "../../services/fileStorageService";
 
 export const PayrollModule: React.FC = () => {
   const { currentRole, currentUser } = useAuth();
   const { employees, logActivity } = useData();
-  const { success } = useToast();
+  const { success, error: toastError, info } = useToast();
 
   const [selectedMonth, setSelectedMonth] = useState("2026-03");
   const [isProcessing, setIsProcessing] = useState(false);
   const [inspectedStub, setInspectedStub] = useState<PayrollRecord | null>(null);
+  const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
+
+  const handleDownloadPayslip = async (stub: PayrollRecord) => {
+    setIsDownloadingPdf(true);
+    const fileName = `Modela_Connect_Payslip_${stub.employeeId}_${stub.month}.pdf`;
+    try {
+      await downloadFileWithFallback({
+        fileName,
+        contentType: "application/pdf",
+        employeeId: stub.employeeId,
+        employeeName: stub.employeeName,
+        documentType: `Official Payslip • Period ${stub.month}`,
+        onSuccess: (msg) => {
+          success("Download Complete", msg);
+        },
+        onNotice: (notice) => {
+          info("Payslip Document Ready", notice);
+        },
+        onError: (errMsg) => {
+          toastError("Payslip Notice", errMsg);
+        },
+      });
+      setInspectedStub(null);
+    } catch (err: any) {
+      toastError("Download Error", `Failed to generate payslip file: ${err?.message || "Storage error"}`);
+    } finally {
+      setIsDownloadingPdf(false);
+    }
+  };
 
   // Role check: Employee (Self-Service My Payslips), Admin & Super Admin (Company-wide Ledger)
   const isEmployee = currentRole === "Employee";
@@ -280,14 +311,17 @@ export const PayrollModule: React.FC = () => {
                   Close
                 </button>
                 <button
-                  onClick={() => {
-                    success("Download Complete", "Official payslip PDF generated and saved.");
-                    setInspectedStub(null);
-                  }}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400 text-white dark:text-slate-950 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                  id="employee-download-payslip-pdf-btn"
+                  disabled={isDownloadingPdf}
+                  onClick={() => inspectedStub && handleDownloadPayslip(inspectedStub)}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400 text-white dark:text-slate-950 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
-                  <Download className="w-3.5 h-3.5" />
-                  Download PDF
+                  {isDownloadingPdf ? (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  ) : (
+                    <Download className="w-3.5 h-3.5" />
+                  )}
+                  {isDownloadingPdf ? "Generating..." : "Download PDF"}
                 </button>
               </div>
             </div>
@@ -495,14 +529,17 @@ export const PayrollModule: React.FC = () => {
                 Close
               </button>
               <button
-                onClick={() => {
-                  success("Download Complete", "Official payslip PDF generated and saved.");
-                  setInspectedStub(null);
-                }}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400 text-white dark:text-slate-950 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                id="admin-download-payslip-pdf-btn"
+                disabled={isDownloadingPdf}
+                onClick={() => inspectedStub && handleDownloadPayslip(inspectedStub)}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-400 text-white dark:text-slate-950 rounded-xl text-xs font-bold flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
               >
-                <Download className="w-3.5 h-3.5" />
-                Download PDF
+                {isDownloadingPdf ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Download className="w-3.5 h-3.5" />
+                )}
+                {isDownloadingPdf ? "Generating..." : "Download PDF"}
               </button>
             </div>
           </div>

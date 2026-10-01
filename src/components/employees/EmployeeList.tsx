@@ -18,6 +18,7 @@ import { TableSkeleton } from "../ui/Skeleton";
 import { EmployeeFormModal } from "./EmployeeFormModal";
 import { EmployeeProfileView } from "./EmployeeProfileView";
 import { BulkImportModal } from "./BulkImportModal";
+import { triggerBlobDownload } from "../../services/fileStorageService";
 
 export const EmployeeList: React.FC = () => {
   const { employees, deleteEmployee, isLoading } = useData();
@@ -89,17 +90,20 @@ export const EmployeeList: React.FC = () => {
   };
 
   const handleExportCSV = () => {
-    const headers = ["Emp ID,Name,DOJ,Designation,Contact Phone"];
-    const rows = filteredEmployees.map(
-      (e) =>
-        `"${e.id}","${e.firstName} ${e.lastName}","${e.joiningDate}","${e.designation}","${e.phone || ""}"`
-    );
-    const blob = new Blob([headers.concat(rows).join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `Modela_Connect_Employees_${new Date().toISOString().split("T")[0]}.csv`;
-    a.click();
+    try {
+      const headers = ["Emp ID,Name,DOJ,Designation,Contact Phone"];
+      const rows = filteredEmployees.map(
+        (e) =>
+          `"${e.id}","${e.firstName} ${e.lastName}","${e.joiningDate}","${e.designation}","${e.phone || ""}"`
+      );
+      const blob = new Blob([headers.concat(rows).join("\n")], {
+        type: "text/csv;charset=utf-8;",
+      });
+      const fileName = `Modela_Connect_Employees_${new Date().toISOString().split("T")[0]}.csv`;
+      triggerBlobDownload(blob, fileName);
+    } catch (err) {
+      console.error("Export CSV failed:", err);
+    }
   };
 
   return (

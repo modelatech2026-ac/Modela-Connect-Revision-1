@@ -16,6 +16,7 @@ import {
   Lock,
 } from "lucide-react";
 import { useTwoFactor } from "../../context/TwoFactorContext";
+import { triggerBlobDownload } from "../../services/fileStorageService";
 
 export const BackupCodesModal: React.FC = () => {
   const {
@@ -49,24 +50,22 @@ export const BackupCodesModal: React.FC = () => {
 
   const handleDownload = () => {
     if (backupCodes.length === 0) return;
-    const fileContent = [
-      "MODELA CONNECT ENTERPRISE 2FA EMERGENCY RECOVERY CODES",
-      `Generated: ${new Date().toLocaleString()}`,
-      "-------------------------------------------------------",
-      ...backupCodes.map((code, index) => `${index + 1}. ${code}`),
-      "-------------------------------------------------------",
-      "Store this file in an encrypted vault or password manager.",
-    ].join("\n");
+    try {
+      const fileContent = [
+        "MODELA CONNECT ENTERPRISE 2FA EMERGENCY RECOVERY CODES",
+        `Generated: ${new Date().toLocaleString()}`,
+        "-------------------------------------------------------",
+        ...backupCodes.map((code, index) => `${index + 1}. ${code}`),
+        "-------------------------------------------------------",
+        "Store this file in an encrypted vault or password manager.",
+      ].join("\n");
 
-    const blob = new Blob([fileContent], { type: "text/plain;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `modela-2fa-backup-codes-${Date.now()}.txt`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+      const blob = new Blob([fileContent], { type: "text/plain;charset=utf-8;" });
+      const fileName = `modela-2fa-backup-codes-${Date.now()}.txt`;
+      triggerBlobDownload(blob, fileName);
+    } catch (err) {
+      console.error("Download backup codes failed:", err);
+    }
   };
 
   const handlePrint = () => {

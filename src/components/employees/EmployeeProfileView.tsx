@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   X,
   Edit,
@@ -14,11 +14,18 @@ import {
   Download,
   ShieldCheck,
   AlertCircle,
+  Loader2,
+  UploadCloud,
 } from "lucide-react";
-import { Employee } from "../../types";
+import { Employee, EmployeeDocument } from "../../types";
 import { StatusBadge } from "../ui/StatusBadge";
 import { useData } from "../../context/DataContext";
 import { useAuth } from "../../context/AuthContext";
+import { useToast } from "../../context/ToastContext";
+import {
+  downloadFileWithFallback,
+  uploadDocumentToStorage,
+} from "../../services/fileStorageService";
 
 interface EmployeeProfileViewProps {
   employee: Employee;
@@ -34,8 +41,12 @@ export const EmployeeProfileView: React.FC<EmployeeProfileViewProps> = ({
   onEdit,
 }) => {
   const { currentRole } = useAuth();
-  const { attendanceRecords, payrollRecords, requests } = useData();
+  const { attendanceRecords, payrollRecords, requests, updateEmployee } = useData();
+  const { success, error: toastError, info } = useToast();
   const [activeTab, setActiveTab] = useState<TabKey>("Personal");
+  const [downloadingDocId, setDownloadingDocId] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const tabs: TabKey[] = [
     "Personal",
@@ -51,6 +62,56 @@ export const EmployeeProfileView: React.FC<EmployeeProfileViewProps> = ({
   const empRequests = requests.filter((r) => r.employeeId === employee.id);
 
   const canEdit = ["Super Admin", "HR Admin"].includes(currentRole);
+
+  const handleDownload = async (doc: EmployeeDocument) => {
+    setDownloadingDocId(doc.id);
+    try {
+      await downloadFileWithFallback({
+        filePath: doc.filePath || `employees/${employee.id}/documents/${doc.name}`,
+        fileUrl: doc.url,
+        fileName: doc.name,
+        contentType: doc.name.endsWith(".pdf") ? "application/pdf" : undefined,
+        employeeId: employee.id,
+        employeeName: `${employee.firstName} ${employee.lastName}`,
+        documentType: doc.type,
+        onSuccess: (msg) => {
+          success("Download Complete", msg);
+        },
+        onNotice: (noticeMsg) => {
+          info("Verified Fallback Archive", noticeMsg);
+        },
+        onError: (errMsg) => {
+          toastError("Download Failed", errMsg);
+        },
+      });
+    } catch (err: any) {
+      toastError(
+        "Download Error",
+        `Failed to download file "${doc.name}": ${err?.message || "Storage error"}`
+      );
+    } finally {
+      setDownloadingDocId(null);
+    }
+  };
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      setIsUploading(true);
+      const newDoc = await uploadDocumentToStorage(file, employee.id, "Identity Artifact");
+      const currentDocs = employee.documents || [];
+      const updatedDocs = [...currentDocs, newDoc];
+      await updateEmployee(employee.id, { documents: updatedDocs });
+      success("Document Uploaded", `${file.name} saved to employee dossier.`);
+    } catch (err: any) {
+      toastError("Upload Failed", err?.message || "Failed to upload document");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
 
   return (
     <div
@@ -271,15 +332,41 @@ export const EmployeeProfileView: React.FC<EmployeeProfileViewProps> = ({
           {activeTab === "Documents" && (
             <div className="space-y-4">
               <div className="flex items-center justify-between">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-stone-500 dark:text-slate-400">
-                  Verified Identity & Compliance Artifacts
-                </h3>
-                <button
-                  id="upload-doc-stub-btn"
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs cursor-pointer"
-                >
-                  Upload New Document
-                </button>
+                <div>
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-stone-500 dark:text-slate-400">
+                    Verified Identity & Compliance Artifacts
+                  </h3>
+                  <p className="text-[11px] text-stone-400 dark:text-slate-500">
+                    Direct integration with Firebase Storage with verified offline fallback archive.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="file"
+                    ref={fileInputRef}
+                    onChange={handleFileUpload}
+                    className="hidden"
+                    accept=".pdf,.png,.jpg,.jpeg,.doc,.docx,.txt"
+                  />
+                  <button
+                    id="upload-doc-stub-btn"
+                    disabled={isUploading}
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg shadow-xs cursor-pointer disabled:opacity-50"
+                  >
+                    {isUploading ? (
+                      <>
+                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                        Uploading...
+                      </>
+                    ) : (
+                      <>
+                        <UploadCloud className="w-3.5 h-3.5" />
+                        Upload New Document
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
@@ -288,35 +375,45 @@ export const EmployeeProfileView: React.FC<EmployeeProfileViewProps> = ({
                     No documents uploaded for this identity yet.
                   </div>
                 ) : (
-                  (employee.documents || []).map((doc) => (
-                    <div
-                      key={doc.id}
-                      className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-stone-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800/40 flex items-center justify-center text-blue-700 dark:text-sky-400">
-                          <FileText className="w-5 h-5" />
+                  (employee.documents || []).map((doc) => {
+                    const isDownloading = downloadingDocId === doc.id;
+                    return (
+                      <div
+                        key={doc.id}
+                        className="p-4 bg-white dark:bg-slate-900 rounded-xl border border-stone-200 dark:border-slate-800 shadow-xs flex items-center justify-between gap-3"
+                      >
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800/40 flex items-center justify-center text-blue-700 dark:text-sky-400 shrink-0">
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <div className="text-xs font-bold text-stone-900 dark:text-slate-100 truncate max-w-[200px]" title={doc.name}>
+                              {doc.name}
+                            </div>
+                            <div className="text-[11px] text-stone-500 dark:text-slate-400 truncate">
+                              {doc.type} • {doc.size}
+                            </div>
+                          </div>
                         </div>
-                        <div>
-                          <div className="text-xs font-bold text-stone-900 dark:text-slate-100 truncate max-w-[200px]">
-                            {doc.name}
-                          </div>
-                          <div className="text-[11px] text-stone-500 dark:text-slate-400">
-                            {doc.type} • {doc.size}
-                          </div>
+                        <div className="flex items-center gap-2 shrink-0">
+                          <StatusBadge label={doc.status} size="sm" />
+                          <button
+                            title={`Download ${doc.name}`}
+                            disabled={isDownloading}
+                            onClick={() => handleDownload(doc)}
+                            className="p-1.5 text-stone-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-sky-400 rounded-lg hover:bg-stone-100 dark:hover:bg-slate-800 cursor-pointer transition-colors disabled:opacity-50"
+                            aria-label={`Download ${doc.name}`}
+                          >
+                            {isDownloading ? (
+                              <Loader2 className="w-4 h-4 animate-spin text-blue-600 dark:text-sky-400" />
+                            ) : (
+                              <Download className="w-4 h-4" />
+                            )}
+                          </button>
                         </div>
                       </div>
-                      <div className="flex items-center gap-2">
-                        <StatusBadge label={doc.status} size="sm" />
-                        <button
-                          title="Download Document"
-                          className="p-1.5 text-stone-400 hover:text-stone-800 dark:hover:text-slate-200 rounded hover:bg-stone-100 dark:hover:bg-slate-800"
-                        >
-                          <Download className="w-4 h-4" />
-                        </button>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
             </div>

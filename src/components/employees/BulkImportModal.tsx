@@ -12,6 +12,7 @@ import {
 import { useData } from "../../context/DataContext";
 import { useToast } from "../../context/ToastContext";
 import { Employee } from "../../types";
+import { triggerBlobDownload } from "../../services/fileStorageService";
 
 interface BulkImportModalProps {
   isOpen: boolean;
@@ -50,20 +51,18 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
   if (!isOpen) return null;
 
   const downloadSampleTemplate = () => {
-    const csvContent =
-      "Emp ID,Name,DOJ,Designation,Contact\n" +
-      "MOD001,Sourav Ganguly,2026-09-15,Senior BIM Engineer,9830012345\n" +
-      "MOD002,Pooja Sharma,2026-09-16,MEP Designer,9876543210\n" +
-      "MOD003,Rahul Banerjee,2026-09-16,Automation Associate,8899776655";
+    try {
+      const csvContent =
+        "Emp ID,Name,DOJ,Designation,Contact\n" +
+        "MOD001,Sourav Ganguly,2026-09-15,Senior BIM Engineer,9830012345\n" +
+        "MOD002,Pooja Sharma,2026-09-16,MEP Designer,9876543210\n" +
+        "MOD003,Rahul Banerjee,2026-09-16,Automation Associate,8899776655";
 
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.setAttribute("download", "Modela_Connect_Employee_Import_Template.csv");
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      triggerBlobDownload(blob, "Modela_Connect_Employee_Import_Template.csv");
+    } catch (err) {
+      console.error("Failed to download template:", err);
+    }
   };
 
   const parseCSVText = (text: string) => {

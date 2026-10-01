@@ -15,6 +15,7 @@ import {
 import { useData } from "../../context/DataContext";
 import { ActivityLog, AuditAction, AuditModule } from "../../types";
 import { StatusBadge } from "../ui/StatusBadge";
+import { triggerBlobDownload } from "../../services/fileStorageService";
 
 export const ActivityLogViewer: React.FC = () => {
   const { activityLogs } = useData();
@@ -81,18 +82,14 @@ export const ActivityLogViewer: React.FC = () => {
 
   // Export JSON
   const handleExportJSON = () => {
-    const dataStr =
-      "data:text/json;charset=utf-8," +
-      encodeURIComponent(JSON.stringify(filteredLogs, null, 2));
-    const downloadAnchor = document.createElement("a");
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute(
-      "download",
-      `Modela_Connect_Audit_Trail_${new Date().toISOString().split("T")[0]}.json`
-    );
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
+    try {
+      const jsonContent = JSON.stringify(filteredLogs, null, 2);
+      const blob = new Blob([jsonContent], { type: "application/json;charset=utf-8;" });
+      const fileName = `Modela_Connect_Audit_Trail_${new Date().toISOString().split("T")[0]}.json`;
+      triggerBlobDownload(blob, fileName);
+    } catch (err) {
+      console.error("Export audit logs failed:", err);
+    }
   };
 
   const getActionBadgeColor = (action: string) => {

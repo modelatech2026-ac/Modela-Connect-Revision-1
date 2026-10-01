@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import {
   BarChart3,
   TrendingUp,
@@ -7,15 +7,46 @@ import {
   Calendar,
   CreditCard,
   PieChart,
+  Loader2,
 } from "lucide-react";
 import { useData } from "../../context/DataContext";
+import { useToast } from "../../context/ToastContext";
+import { downloadFileWithFallback } from "../../services/fileStorageService";
 
 export const ReportsModule: React.FC = () => {
   const { employees, attendanceRecords, payrollRecords } = useData();
+  const { success, error: toastError, info } = useToast();
+  const [isExporting, setIsExporting] = useState(false);
 
   const totalEmployees = employees.length;
   const activeCount = employees.filter((e) => e.status === "ACTIVE").length;
   const onboardingCount = employees.filter((e) => e.status === "ONBOARDING").length;
+
+  const handleExportDossier = async () => {
+    setIsExporting(true);
+    const fileName = `Modela_Connect_Executive_Report_${new Date().toISOString().split("T")[0]}.pdf`;
+    try {
+      await downloadFileWithFallback({
+        fileName,
+        contentType: "application/pdf",
+        documentType: "Executive Dossier & Compliance Audit",
+        employeeName: "Executive HR & Operations Board",
+        onSuccess: (msg) => {
+          success("Report Exported", msg);
+        },
+        onNotice: (notice) => {
+          info("Executive Dossier Ready", notice);
+        },
+        onError: (errMsg) => {
+          toastError("Export Notice", errMsg);
+        },
+      });
+    } catch (err: any) {
+      toastError("Export Failed", `Failed to generate report file: ${err?.message || "Storage error"}`);
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -36,11 +67,17 @@ export const ReportsModule: React.FC = () => {
         </div>
 
         <button
-          onClick={() => alert("Report compiled and ready for PDF distribution.")}
-          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-900 hover:bg-stone-50 dark:hover:bg-slate-800 text-stone-800 dark:text-stone-200 text-xs font-semibold rounded-xl border border-stone-200 dark:border-slate-800 shadow-2xs transition-colors self-start sm:self-auto"
+          id="export-executive-report-btn"
+          disabled={isExporting}
+          onClick={handleExportDossier}
+          className="inline-flex items-center gap-1.5 px-4 py-2 bg-white dark:bg-slate-900 hover:bg-stone-50 dark:hover:bg-slate-800 text-stone-800 dark:text-stone-200 text-xs font-semibold rounded-xl border border-stone-200 dark:border-slate-800 shadow-2xs transition-colors self-start sm:self-auto cursor-pointer disabled:opacity-50"
         >
-          <Download className="w-3.5 h-3.5 text-stone-500" />
-          Export Executive Dossier
+          {isExporting ? (
+            <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600 dark:text-sky-400" />
+          ) : (
+            <Download className="w-3.5 h-3.5 text-stone-500" />
+          )}
+          {isExporting ? "Generating Dossier..." : "Export Executive Dossier"}
         </button>
       </div>
 

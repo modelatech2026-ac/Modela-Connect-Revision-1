@@ -56,6 +56,8 @@ export interface EmployeeDocument {
   status: "VERIFIED" | "PENDING" | "REJECTED";
   uploadDate: string;
   size: string;
+  filePath?: string;
+  url?: string;
 }
 
 export interface Employee {
