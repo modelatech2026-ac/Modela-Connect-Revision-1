@@ -5,10 +5,8 @@
 
 import { AppUser, BulkPurgeSummary } from "../types";
 
-// Firebase modular imports (optional runtime resolution)
-import { initializeApp, getApps, FirebaseApp } from "firebase/app";
+import { FirebaseApp } from "firebase/app";
 import {
-  getFirestore,
   collection,
   getDocs,
   writeBatch,
@@ -17,13 +15,13 @@ import {
   Firestore,
 } from "firebase/firestore";
 import {
-  getStorage,
   ref,
   listAll,
   deleteObject,
   FirebaseStorage,
   StorageReference,
 } from "firebase/storage";
+import { getSafeFirebase, getFirebaseStorage } from "../firebase";
 
 export interface PurgeProgressCallback {
   (stage: string, progressPercent: number, details?: string): void;
@@ -45,34 +43,9 @@ function getSafeFirebaseInstances(): {
   storage: FirebaseStorage | null;
 } {
   try {
-    const existingApps = getApps();
-    if (existingApps.length > 0) {
-      const app = existingApps[0];
-      return {
-        app,
-        db: getFirestore(app),
-        storage: getStorage(app),
-      };
-    }
-
-    // Check if environment variables or default config exist
-    const metaEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {};
-    const apiKey = metaEnv.VITE_FIREBASE_API_KEY;
-    const projectId = metaEnv.VITE_FIREBASE_PROJECT_ID;
-
-    if (apiKey && projectId) {
-      const app = initializeApp({
-        apiKey,
-        authDomain: `${projectId}.firebaseapp.com`,
-        projectId,
-        storageBucket: `${projectId}.appspot.com`,
-      });
-      return {
-        app,
-        db: getFirestore(app),
-        storage: getStorage(app),
-      };
-    }
+    const { app, db } = getSafeFirebase();
+    const storage = getFirebaseStorage();
+    return { app, db, storage };
   } catch (err) {
     console.warn("Firebase native instance unavailable, executing in local master mode:", err);
   }

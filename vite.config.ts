@@ -27,6 +27,16 @@ export default defineConfig(() => {
         output: {
           manualChunks(id) {
             if (id.includes('node_modules')) {
+              // Split heavy dependencies (Firebase SDK, Lucide icons, Gemini SDK) into separate vendor chunk
+              if (
+                id.includes('firebase') ||
+                id.includes('@firebase') ||
+                id.includes('lucide-react') ||
+                id.includes('@google/genai') ||
+                id.includes('@google/generative-ai')
+              ) {
+                return 'vendor';
+              }
               return 'vendor';
             }
           },

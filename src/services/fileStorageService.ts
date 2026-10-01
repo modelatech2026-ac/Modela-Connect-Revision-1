@@ -3,51 +3,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { getApps, initializeApp, FirebaseApp } from "firebase/app";
 import {
-  getStorage,
   ref,
   getDownloadURL,
   uploadBytes,
   FirebaseStorage,
 } from "firebase/storage";
 import { EmployeeDocument } from "../types";
+import { getFirebaseStorage } from "../firebase";
 
-/**
- * Resolves Firebase Storage instance safely across environments
- */
-export function getFirebaseStorage(): FirebaseStorage | null {
-  try {
-    const existingApps = getApps();
-    if (existingApps.length > 0) {
-      return getStorage(existingApps[0]);
-    }
-
-    const metaEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {};
-    const apiKey = metaEnv.VITE_FIREBASE_API_KEY;
-    const projectId = metaEnv.VITE_FIREBASE_PROJECT_ID;
-
-    if (
-      apiKey &&
-      projectId &&
-      !apiKey.toLowerCase().includes("dummy") &&
-      !projectId.toLowerCase().includes("dummy") &&
-      apiKey.length > 20
-    ) {
-      const app = initializeApp({
-        apiKey,
-        authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || `${projectId}.firebaseapp.com`,
-        projectId,
-        storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || `${projectId}.appspot.com`,
-      });
-      return getStorage(app);
-    }
-  } catch (err) {
-    console.warn("Firebase Storage initialization note:", err);
-  }
-
-  return null;
-}
+export { getFirebaseStorage };
 
 /**
  * Determines appropriate MIME Content-Type from filename

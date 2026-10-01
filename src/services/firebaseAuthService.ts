@@ -30,32 +30,13 @@ import {
 } from "firebase/firestore";
 import { AuthRequestUser, UserRole, AuthorizationStatus, AppUser } from "../types";
 
-/**
- * Standard Firebase Configuration
- */
-const metaEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {};
+import {
+  firebaseConfig,
+  isLiveFirebaseConfigured,
+  getSafeFirebase,
+} from "../firebase";
 
-const rawApiKey = metaEnv.VITE_FIREBASE_API_KEY || "";
-const rawProjectId = metaEnv.VITE_FIREBASE_PROJECT_ID || "";
-
-const isLiveFirebaseConfigured = Boolean(
-  rawApiKey &&
-  rawProjectId &&
-  !rawApiKey.toLowerCase().includes("dummy") &&
-  !rawProjectId.toLowerCase().includes("dummy") &&
-  rawApiKey.length > 20
-);
-
-export const firebaseConfig = isLiveFirebaseConfigured
-  ? {
-      apiKey: rawApiKey,
-      authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || `${rawProjectId}.firebaseapp.com`,
-      projectId: rawProjectId,
-      storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || `${rawProjectId}.appspot.com`,
-      messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || "",
-      appId: metaEnv.VITE_FIREBASE_APP_ID || "",
-    }
-  : null;
+export { firebaseConfig, isLiveFirebaseConfigured, getSafeFirebase };
 
 /**
  * Standardized Firestore error handler adhering to platform guidelines
@@ -67,40 +48,6 @@ export function handleFirestoreError(error: unknown, operationType: string, path
     path,
   };
   throw new Error(JSON.stringify(errObj));
-}
-
-/**
- * Resolves or initializes Firebase App, Auth, and Firestore
- */
-export function getSafeFirebase(): { app: FirebaseApp | null; auth: Auth | null; db: Firestore | null } {
-  if (!isLiveFirebaseConfigured || !firebaseConfig) {
-    return { app: null, auth: null, db: null };
-  }
-
-  try {
-    const apps = getApps();
-    if (apps.length > 0) {
-      const app = apps[0];
-      return {
-        app,
-        auth: getAuth(app),
-        db: getFirestore(app),
-      };
-    }
-
-    if (firebaseConfig.apiKey && firebaseConfig.projectId) {
-      const app = initializeApp(firebaseConfig);
-      return {
-        app,
-        auth: getAuth(app),
-        db: getFirestore(app),
-      };
-    }
-    return { app: null, auth: null, db: null };
-  } catch (err) {
-    console.warn("Firebase Auth/Firestore initialization warning:", err);
-    return { app: null, auth: null, db: null };
-  }
 }
 
 /**
@@ -361,6 +308,14 @@ export async function submitAccessRequest(userData: {
     };
 
     await setDoc(reqDocRef, newDocData);
+
+    // Direct write to 'requests' collection in Cloud Firestore with lowercase status: "pending"
+    const generalRequestRef = doc(db, "requests", deterministicUid);
+    await setDoc(generalRequestRef, {
+      ...newDocData,
+      id: deterministicUid,
+      status: "pending",
+    });
 
     // Also maintain mirror record in users collection for RBAC
     const userDocRef = doc(db, "users", deterministicUid);
@@ -660,18 +615,29 @@ export function subscribeToAllRequests(
   }
 
   try {
-    const colRef = collection(db, "access_requests");
+    // Listen directly to 'requests' collection without requiring strict compound indexes
+    const colRef = collection(db, "requests");
     return onSnapshot(
       colRef,
       (snapshot) => {
         const list: AuthRequestUser[] = snapshot.docs.map((docSnap) =>
           normalizeToAuthRequest(docSnap.data(), docSnap.id)
         );
+        // Fall back to client-side filtering for pending items in caller
         callback(list);
       },
       (error) => {
-        console.warn("[Firestore] subscribeToAllRequests error:", error);
-        if (onError) onError(error);
+        console.warn("[Firestore] subscribeToAllRequests on 'requests' notice, falling back:", error);
+        // Fallback to access_requests if requests collection is not indexed or permitted
+        try {
+          const fallbackCol = collection(db, "access_requests");
+          return onSnapshot(fallbackCol, (snap) => {
+            const list = snap.docs.map((d) => normalizeToAuthRequest(d.data(), d.id));
+            callback(list);
+          });
+        } catch {
+          if (onError) onError(error);
+        }
       }
     );
   } catch (err) {
@@ -718,6 +684,12 @@ export async function handleRequestAction(
       const accessReqRef = doc(db, "access_requests", requestId);
       await updateDoc(accessReqRef, updatePayload).catch(() =>
         setDoc(accessReqRef, updatePayload, { merge: true })
+      );
+
+      // Also update directly in 'requests' collection with lowercase status
+      const genReqRef = doc(db, "requests", requestId);
+      await updateDoc(genReqRef, updatePayload).catch(() =>
+        setDoc(genReqRef, updatePayload, { merge: true })
       );
 
       // Sync mirror users document for RBAC

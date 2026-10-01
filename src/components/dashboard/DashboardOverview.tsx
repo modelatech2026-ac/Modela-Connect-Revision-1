@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Users,
@@ -24,6 +24,8 @@ import {
 import { useData } from "../../context/DataContext";
 import { useAuth } from "../../context/AuthContext";
 import { StatusBadge } from "../ui/StatusBadge";
+import { getSafeFirebase } from "../../firebase";
+import { collection, onSnapshot } from "firebase/firestore";
 
 export const DashboardOverview: React.FC = () => {
   const { employees, attendanceRecords, requests, payrollRecords, activityLogs } = useData();
@@ -32,10 +34,58 @@ export const DashboardOverview: React.FC = () => {
 
   const isEmployee = currentRole === "Employee";
 
+  // Real-time Firestore 'requests' state without compound index requirements
+  const [firestoreRequests, setFirestoreRequests] = useState<any[]>([]);
+  const [isLiveListening, setIsLiveListening] = useState(false);
+
+  useEffect(() => {
+    const { db } = getSafeFirebase();
+    if (!db) return;
+
+    try {
+      // Listen directly to 'requests' collection without requiring strict compound indexes
+      const reqCol = collection(db, "requests");
+      const unsubscribe = onSnapshot(
+        reqCol,
+        (snapshot) => {
+          const list = snapshot.docs.map((docSnap) => ({
+            id: docSnap.id,
+            ...docSnap.data(),
+          }));
+          setFirestoreRequests(list);
+          setIsLiveListening(true);
+        },
+        (error) => {
+          // If index error occurs, fall back to client-side filtering on DataContext items
+          console.warn(
+            "[HR Dashboard] onSnapshot error on 'requests' collection, falling back to client-side filtering:",
+            error
+          );
+        }
+      );
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.warn("[HR Dashboard] Failed to initialize requests listener:", err);
+    }
+  }, []);
+
+  // Filter pending items on client side to avoid strict compound index requirements
+  const pendingRequestsCount = useMemo(() => {
+    if (isLiveListening && firestoreRequests.length > 0) {
+      const clientFiltered = firestoreRequests.filter((r) => {
+        const s = String(r.status || "").trim().toLowerCase();
+        return s === "pending";
+      });
+      return clientFiltered.length;
+    }
+    return requests.filter((r) => String(r.status || "").trim().toLowerCase() === "pending").length;
+  }, [isLiveListening, firestoreRequests, requests]);
+
   // System-wide metrics for Admin / Super Admin
   const totalEmployees = employees.length;
   const activeEmployees = employees.filter((e) => e.status === "ACTIVE").length;
-  const pendingRequests = requests.filter((r) => r.status === "PENDING").length;
+  const pendingRequests = pendingRequestsCount;
 
   const totalMonthlyPayroll = employees.reduce(
     (acc, cur) => acc + (cur.compensation.basic + cur.compensation.allowances),

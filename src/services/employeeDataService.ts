@@ -4,40 +4,15 @@
  */
 
 import { Employee } from "../types";
-import { getApps, initializeApp } from "firebase/app";
-import { getFirestore, writeBatch, doc } from "firebase/firestore";
+import { writeBatch, doc } from "firebase/firestore";
+import { getSafeFirebase } from "../firebase";
 
 /**
  * Safely resolves Firestore instance if configured
  */
 function getSafeDb() {
-  try {
-    const metaEnv = (import.meta as unknown as { env?: Record<string, string | undefined> })?.env || {};
-    const apiKey = metaEnv.VITE_FIREBASE_API_KEY;
-    const projectId = metaEnv.VITE_FIREBASE_PROJECT_ID;
-    if (
-      !apiKey ||
-      !projectId ||
-      apiKey.toLowerCase().includes("dummy") ||
-      projectId.toLowerCase().includes("dummy") ||
-      apiKey.length < 20
-    ) {
-      return null;
-    }
-    const apps = getApps();
-    if (apps.length > 0) {
-      return getFirestore(apps[0]);
-    }
-    const app = initializeApp({
-      apiKey,
-      authDomain: `${projectId}.firebaseapp.com`,
-      projectId,
-    });
-    return getFirestore(app);
-  } catch (err) {
-    console.warn("Firestore not initialized or unavailable:", err);
-    return null;
-  }
+  const { db } = getSafeFirebase();
+  return db;
 }
 
 /**

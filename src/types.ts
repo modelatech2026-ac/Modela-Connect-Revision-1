@@ -205,7 +205,7 @@ export interface RequestRecord {
   id: string;
   employeeId: string;
   employeeName: string;
-  department: string;
+  department?: string;
   type: RequestType;
   title: string;
   description: string;

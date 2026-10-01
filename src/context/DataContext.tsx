@@ -36,6 +36,15 @@ import {
 import { useAuth } from "./AuthContext";
 import { useToast } from "./ToastContext";
 import { checkIsUserSuperAdmin, isRoleSuperAdmin } from "../lib/authUtils";
+import { getSafeFirebase } from "../firebase";
+import {
+  collection,
+  doc,
+  setDoc,
+  updateDoc,
+  onSnapshot,
+  serverTimestamp,
+} from "firebase/firestore";
 
 interface DataContextType {
   employees: Employee[];
@@ -346,6 +355,61 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (eventSource) eventSource.close();
       if (typeof unsubscribe === "function") unsubscribe();
     };
+  }, []);
+
+  // Real-time synchronization of requests from Firestore 'requests' collection without requiring compound indexes
+  useEffect(() => {
+    const { db } = getSafeFirebase();
+    if (!db) return;
+
+    try {
+      const reqCol = collection(db, "requests");
+      const unsubscribe = onSnapshot(
+        reqCol,
+        (snapshot) => {
+          if (!snapshot.empty) {
+            const firestoreReqs: RequestRecord[] = snapshot.docs.map((d) => {
+              const data = d.data();
+              const rawStatus = String(data.status || "pending").toUpperCase();
+              return {
+                id: d.id,
+                employeeId: data.employeeId || data.userId || "EMP101",
+                employeeName: data.employeeName || data.name || data.applicantName || "Employee",
+                department: data.department || "Engineering",
+                type: data.type || data.requestType || "LEAVE",
+                title: data.title || "Authorization Request",
+                description: data.description || data.remarks || "",
+                amountOrDays: data.amountOrDays || "1 Request",
+                status: (rawStatus === "APPROVED"
+                  ? "APPROVED"
+                  : rawStatus === "REJECTED"
+                  ? "REJECTED"
+                  : "PENDING") as "PENDING" | "APPROVED" | "REJECTED",
+                createdAt: data.createdAt
+                  ? String(data.createdAt).split("T")[0]
+                  : new Date().toISOString().split("T")[0],
+                reviewedBy: data.reviewedBy || undefined,
+                reviewDate: data.reviewDate || undefined,
+              };
+            });
+
+            setRequests((prev) => {
+              const map = new Map<string, RequestRecord>();
+              prev.forEach((r) => map.set(r.id, r));
+              firestoreReqs.forEach((r) => map.set(r.id, r));
+              return Array.from(map.values());
+            });
+          }
+        },
+        (err) => {
+          console.warn("[Firestore] 'requests' onSnapshot notice (fallback to client-side filtering):", err);
+        }
+      );
+
+      return () => unsubscribe();
+    } catch (err) {
+      console.warn("Failed to subscribe to 'requests' collection:", err);
+    }
   }, []);
 
   // Sync to local storage
@@ -739,6 +803,21 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
       )
     );
 
+    // Sync to Firestore 'requests' collection with lowercase status
+    const { db } = getSafeFirebase();
+    if (db) {
+      const lowerStatus = status.toLowerCase();
+      const updateData = {
+        status: lowerStatus,
+        reviewedBy: currentUser?.name || "HR Admin",
+        reviewDate: new Date().toISOString().split("T")[0],
+        reviewedAt: serverTimestamp(),
+      };
+      updateDoc(doc(db, "requests", id), updateData).catch(async () => {
+        await setDoc(doc(db, "requests", id), updateData, { merge: true }).catch(() => {});
+      });
+    }
+
     logActivity(
       "UPDATE",
       "Requests",
@@ -760,16 +839,39 @@ export const DataProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Create Request
-  const createRequest = (newReqData: Omit<RequestRecord, "id" | "createdAt" | "status">) => {
+  const createRequest = async (newReqData: Omit<RequestRecord, "id" | "createdAt" | "status">) => {
     const newId = "REQ-" + Math.floor(400 + Math.random() * 500);
+    const nowIso = new Date().toISOString();
     const newReq: RequestRecord = {
       ...newReqData,
       id: newId,
-      createdAt: new Date().toISOString().split("T")[0],
+      createdAt: nowIso.split("T")[0],
       status: "PENDING",
     };
 
     setRequests((prev) => [newReq, ...prev]);
+
+    // Ensure submitted requests write directly to the 'requests' collection in Cloud Firestore using lowercase status strings (e.g., status: "pending")
+    const { db } = getSafeFirebase();
+    if (db) {
+      try {
+        await setDoc(doc(db, "requests", newId), {
+          id: newId,
+          employeeId: newReqData.employeeId,
+          employeeName: newReqData.employeeName,
+          type: newReqData.type,
+          title: newReqData.title,
+          description: newReqData.description || "",
+          amountOrDays: newReqData.amountOrDays || "",
+          status: "pending", // lowercase status string
+          createdAt: nowIso,
+          requestedAt: nowIso,
+          timestamp: serverTimestamp(),
+        });
+      } catch (err) {
+        console.warn("[Firestore] Failed to write directly to 'requests' collection:", err);
+      }
+    }
 
     logActivity(
       "CREATE",
